@@ -1,0 +1,40 @@
+name: Android Certs Monitor Task
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch: 
+
+jobs:
+  build_and_run:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python_version: '3.x'
+
+      - name: Install Dependencies
+        run: |
+          pip install requests
+
+      - name: Run Script
+        env:
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+        run: python script.py
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "actions@github.com"
+          git add last_snapshot.txt
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last_snapshot [Automated]" && git push)
