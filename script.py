@@ -65,21 +65,28 @@ def display_report(report_text):
     print(report_text)
     print("="*50 + "\n")
 
-class EmailStatus(Enum):
-    SUCCESS = "Email sent successfully via TLS."
-    FAILED = "Failed to send email: {}"
-    MISSING_CREDENTIALS = "Failed: Email credentials (SENDER_EMAIL/SENDER_PASSWORD) are missing."
-    TIMEOUT = "Failed: SMTP server connection timed out."
+# Email Status 
+class EmailStatus:
+    SUCCESS_TYPE = "SUCCESS"
+    FAILED_TYPE = "FAILED"
+    TIMEOUT_TYPE = "TIMEOUT"
+    MISSING_TYPE = "MISSING_CREDENTIALS"
 
-    def with_message(self, extra_msg=""):
-        if self == EmailStatus.FAILED:
-            return self.value.format(extra_msg)
-        return self.value
+    def __init__(self, type, message=""):
+        self.type = type
+        self.message = message
+
+    def is_failure(self):
+        return self.type != EmailStatus.SUCCESS_TYPE
+
+    def __str__(self):
+        return self.message
+
 
 # Sends the report via SMTP.
 def send_email_report(report_text):
     if not SENDER_EMAIL or not SENDER_PASSWORD:
-        return EmailStatus.MISSING_CREDENTIALS.with_message()
+        return EmailStatus(EmailStatus.MISSING_TYPE, "Failed: Email credentials missing.")
     
     msg = EmailMessage()
     msg.set_content(report_text)
@@ -111,11 +118,11 @@ def send_email_report(report_text):
         
         # 6. Close connection gracefully
         server.quit()
-        return EmailStatus.SUCCESS.with_message()
+        return EmailStatus(EmailStatus.SUCCESS_TYPE, "Email sent successfully via TLS.")
     except (socket.timeout, TimeoutError):
-        return EmailStatus.TIMEOUT.with_message()
+        return EmailStatus(EmailStatus.TIMEOUT_TYPE, "Failed: SMTP server connection timed out.")
     except Exception as e:
-        return EmailStatus.FAILED.with_message(str(e))
+        return EmailStatus(EmailStatus.FAILED_TYPE, f"Failed to send email: {error_msg}")
 
 
 def main():
@@ -150,9 +157,9 @@ def main():
         email_status = send_email_report(error_message)
         logEmailStatus(email_status)
 
-def logEmailStatus(status:str):
-    print(status)
-    if status == EmailStatus.FAILED or EmailStatus.TIMEOUT:
+def logEmailStatus(status_obj: EmailStatus):
+    print(status_obj)
+    if status_obj.is_failure():
         sys.exit(1)
 
 
