@@ -1,11 +1,10 @@
 import requests
-import difflib
+import html
 import socket
 import os
 import sys
 import smtplib
 from email.message import EmailMessage
-from enum import Enum
 
 # Configuration Constants
 URL = "https://android.googleapis.com/attestation/root"
@@ -14,58 +13,67 @@ FETCH_CURRENT_CERTS_TIMEOUT_IN_SEC = 60
 SMTP_SERVER_TIMEOUT_IN_SEC = 60
 
 # Email Configuration
-SMTP_SERVER = "smtp.gmail.com"  # Change this if your company uses a different server , example : smtp.office365.com
-SMTP_PORT = 587                 # Standard port for TLS
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 
-# Fetches the raw certificate data from the specified URL.
 def fetch_current_certs(url):
     response = requests.get(url, timeout=FETCH_CURRENT_CERTS_TIMEOUT_IN_SEC)
-    response.raise_for_status()  # Raises an exception for HTTP errors (4xx or 5xx)
+    response.raise_for_status()
     return response.text
 
-# Reads the content of the last saved snapshot from the local disk.
-# Returns None if the file does not exist.
 def load_last_snapshot(file_path):
     if not os.path.exists(file_path):
         return None
     with open(file_path, "r", encoding="utf-8") as f:
         return f.read()
 
-# Saves the current content to a local file for future comparisons.
 def save_snapshot(file_path, content):
-    if not content:
-        print("Warning: Attempted to save empty content. Operation aborted.")
-        return
+    if not content: return
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-# Compares old and new content.
-# Returns a formatted string showing the differences or a 'No changes' message.
-def generate_diff_report(old_content, new_content):
-    if old_content == new_content:
-        return "Status: No changes. The content matches the last month's snapshot."
+def generate_html_report(old_content, new_content):
+    safe_old = html.escape(old_content) if old_content else "No previous data"
+    safe_new = html.escape(new_content)
     
-    # Generate a unified diff for a clear, line-by-line comparison report
-    diff = difflib.unified_diff(
-        old_content.splitlines(),
-        new_content.splitlines(),
-        fromfile='Last_Month_Snapshot',
-        tofile='Current_Web_Data',
-        lineterm=''
-    )
-    
-    diff_text = "\n".join(list(diff))
-    return f"ALERT: Changes detected!\n\nDetailed Report:\n{diff_text}"
+    status_msg = "✅ No changes detected." if old_content == new_content else "⚠️ Changes detected in certificates!"
+    color = "#28a745" if old_content == new_content else "#d9534f"
 
-def display_report(report_text):
-    print("\n" + "="*50)
-    print(report_text)
-    print("="*50 + "\n")
+    report_html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+        <h2 style="color: {color}; border-bottom: 2px solid {color}; padding-bottom: 10px;">
+            Android Attestation Root Certs Report
+        </h2>
+        <p><strong>Status:</strong> {status_msg}</p>
 
-# Email Status 
+        <h3 style="background-color: #f8f9fa; padding: 10px; border-left: 5px solid #6c757d;">Previous Data</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <tr>
+                <td style="border: 1px solid #ddd; padding: 15px; background-color: #ffffff; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;">
+                    {safe_old}
+                </td>
+            </tr>
+        </table>
+
+        <h3 style="background-color: #f8f9fa; padding: 10px; border-left: 5px solid #007bff;">New Data</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+                <td style="border: 1px solid #ddd; padding: 15px; background-color: #ffffff; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;">
+                    {safe_new}
+                </td>
+            </tr>
+        </table>
+        
+        <p style="font-size: 11px; color: #888; margin-top: 20px;">Automated Monitoring System</p>
+    </body>
+    </html>
+    """
+    return report_html
+
 class EmailStatus:
     SUCCESS_TYPE = "SUCCESS"
     FAILED_TYPE = "FAILED"
@@ -75,93 +83,58 @@ class EmailStatus:
     def __init__(self, type, message=""):
         self.type = type
         self.message = message
+    def is_failure(self): return self.type != EmailStatus.SUCCESS_TYPE
+    def __str__(self): return self.message
 
-    def is_failure(self):
-        return self.type != EmailStatus.SUCCESS_TYPE
-
-    def __str__(self):
-        return self.message
-
-
-# Sends the report via SMTP.
-def send_email_report(report_text):
+def send_email_report(report_html):
     if not SENDER_EMAIL or not SENDER_PASSWORD:
         return EmailStatus(EmailStatus.MISSING_TYPE, "Failed: Email credentials missing.")
     
     msg = EmailMessage()
-    msg.set_content(report_text)
     msg['Subject'] = "Android Attestation Root Certs Report"
     msg['From'] = SENDER_EMAIL
     msg['To'] = RECEIVER_EMAIL
-
-    # set mail as a high Priority 
     msg['X-Priority'] = '1 (Highest)'
     msg['Importance'] = 'High'
 
+    msg.set_content("Please use an HTML compatible email client.") # Plain text fallback
+    msg.add_alternative(report_html, subtype='html')
+
     try:
-        # 1. Establish a standard connection
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT,timeout=SMTP_SERVER_TIMEOUT_IN_SEC)
-        server.set_debuglevel(0) # Set to 1 if you want to see the full communication log
-        
-        # 2. Identify ourselves to the server
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_SERVER_TIMEOUT_IN_SEC)
         server.ehlo()
-        
-        # 3. Upgrade the connection to secure TLS
         server.starttls()
-        
-        # 4. Re-identify ourselves as a secure connection
         server.ehlo()
-        
-        # 5. Login and send
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
-        
-        # 6. Close connection gracefully
         server.quit()
-        return EmailStatus(EmailStatus.SUCCESS_TYPE, "Email sent successfully via TLS.")
+        return EmailStatus(EmailStatus.SUCCESS_TYPE, "Email sent successfully.")
     except (socket.timeout, TimeoutError):
-        return EmailStatus(EmailStatus.TIMEOUT_TYPE, "Failed: SMTP server connection timed out.")
+        return EmailStatus(EmailStatus.TIMEOUT_TYPE, "Failed: Connection timed out.")
     except Exception as e:
-        return EmailStatus(EmailStatus.FAILED_TYPE, f"Failed to send email: {error_msg}")
-
+        return EmailStatus(EmailStatus.FAILED_TYPE, f"Failed: {str(e)}")
 
 def main():
     try:
-        # Step 1: Fetch live data
         current_data = fetch_current_certs(URL)
-        
-        # Step 2: Load previous state
         last_data = load_last_snapshot(SNAPSHOT_FILE)
         
-        # Step 3: Handle first-run or comparison
-        if last_data is None:
-            save_snapshot(SNAPSHOT_FILE, current_data)
-            report = "Action: No previous snapshot found. Initial data has been saved."
-        else:
-            report = generate_diff_report(last_data, current_data)
-            if "ALERT" in report:
-                save_snapshot(SNAPSHOT_FILE, current_data)
-
-        # Step 4: Display to console
-        display_report(report)
-
-        # Step 5: Send Email (Regardless of outcome as requested)
-        email_status = send_email_report(report)
-        logEmailStatus(email_status)
+        report = generate_html_report(last_data, current_data)
         
+        if last_data != current_data:
+            save_snapshot(SNAPSHOT_FILE, current_data)
+            print("Snapshot updated due to changes or initial run.")
+
+        status = send_email_report(report)
+        print(status)
+        
+        if status.is_failure():
+            sys.exit(1)
+            
     except Exception as e:
-        error_message = f"Critical Error in Monitor: {e}"
-        display_report(error_message)
-
-        # Send error as a report too
-        email_status = send_email_report(error_message)
-        logEmailStatus(email_status)
-
-def logEmailStatus(status_obj: EmailStatus):
-    print(status_obj)
-    if status_obj.is_failure():
-        sys.exit(1)
-
+        error_html = f"<h3>Critical Error</h3><p>{html.escape(str(e))}</p>"
+        send_email_report(error_html)
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     main()
