@@ -20,59 +20,75 @@ RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 
 def fetch_current_certs(url):
-    response = requests.get(url, timeout=FETCH_CURRENT_CERTS_TIMEOUT_IN_SEC)
-    response.raise_for_status()
-    return response.text
+    try:
+        response = requests.get(url, timeout=FETCH_CURRENT_CERTS_TIMEOUT_IN_SEC)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        error_msg = "Exp from fetch_current_certs() , message : "+str(e)
+        raise Exception(error_msg) from e
 
 def load_last_snapshot(file_path):
-    if not os.path.exists(file_path):
-        return None
-    with open(file_path, "r", encoding="utf-8") as f:
-        return f.read()
+    try:
+        if not os.path.exists(file_path):
+            return None
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        error_msg = "Exp from load_last_snapshot() , message : "+str(e)
+        raise Exception(error_msg) from e
 
 def save_snapshot(file_path, content):
-    if not content: return
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-def generate_html_report(old_content, new_content):
-    safe_old = html.escape(old_content) if old_content else "No previous data"
-    safe_new = html.escape(new_content)
+    try:
+        if not content: return
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+    except Exception as e:
+        error_msg = "Exp from save_snapshot() , message : "+str(e)
+        raise Exception(error_msg) from e
     
-    status_msg = "✅ No changes detected." if old_content == new_content else "⚠️ Changes detected in certificates!"
-    color = "#28a745" if old_content == new_content else "#d9534f"
-
-    report_html = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
-        <h2 style="color: {color}; border-bottom: 2px solid {color}; padding-bottom: 10px;">
-            Android Attestation Root Certs Report
-        </h2>
-        <p><strong>Status:</strong> {status_msg}</p>
-
-        <h3 style="background-color: #f8f9fa; padding: 10px; border-left: 5px solid #6c757d;">Previous Data</h3>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-            <tr>
-                <td style="border: 1px solid #ddd; padding: 15px; background-color: #ffffff; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;">
-                    {safe_old}
-                </td>
-            </tr>
-        </table>
-
-        <h3 style="background-color: #f8f9fa; padding: 10px; border-left: 5px solid #007bff;">New Data</h3>
-        <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-                <td style="border: 1px solid #ddd; padding: 15px; background-color: #ffffff; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;">
-                    {safe_new}
-                </td>
-            </tr>
-        </table>
+def generate_html_report(old_content, new_content):
+    try:
+        safe_old = html.escape(old_content) if old_content else "No previous data"
+        safe_new = html.escape(new_content)
         
-        <p style="font-size: 11px; color: #888; margin-top: 20px;">Automated Monitoring System</p>
-    </body>
-    </html>
-    """
-    return report_html
+        status_msg = "✅ No changes detected." if old_content == new_content else "⚠️ Changes detected in certificates!"
+        color = "#28a745" if old_content == new_content else "#d9534f"
+
+        report_html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+            <h2 style="color: {color}; border-bottom: 2px solid {color}; padding-bottom: 10px;">
+                Android Attestation Root Certs Report
+            </h2>
+            <p><strong>Status:</strong> {status_msg}</p>
+
+            <h3 style="background-color: #f8f9fa; padding: 10px; border-left: 5px solid #6c757d;">Previous Data</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 15px; background-color: #ffffff; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;">
+                        {safe_old}
+                    </td>
+                </tr>
+            </table>
+
+            <h3 style="background-color: #f8f9fa; padding: 10px; border-left: 5px solid #007bff;">New Data</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 15px; background-color: #ffffff; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;">
+                        {safe_new}
+                    </td>
+                </tr>
+            </table>
+            
+            <p style="font-size: 11px; color: #888; margin-top: 20px;">Automated Monitoring System</p>
+        </body>
+        </html>
+        """
+        return report_html
+    except Exception as e:
+        error_msg = "Exp from generate_html_report() , message : "+str(e)
+        raise Exception(error_msg) from e
 
 class EmailStatus:
     SUCCESS_TYPE = "SUCCESS"
@@ -123,18 +139,24 @@ def main():
         
         if last_data != current_data:
             save_snapshot(SNAPSHOT_FILE, current_data)
-            print("Snapshot updated due to changes or initial run.")
-
-        status = send_email_report(report)
-        print(status)
-        
-        if status.is_failure():
-            sys.exit(1)
+            
+        # Step 5: Send Email (Regardless of outcome as requested)
+        email_status = send_email_report(report)
+        logEmailStatus(email_status)
             
     except Exception as e:
-        error_html = f"<h3>Critical Error</h3><p>{html.escape(str(e))}</p>"
-        send_email_report(error_html)
-        print(f"Error: {e}")
+        error_message = f"Critical Error in Monitor: {e}"
+        display_report(error_message)
+
+        # Send error as a report too
+        email_status = send_email_report(error_message)
+        logEmailStatus(email_status)
+
+
+def logEmailStatus(status_obj: EmailStatus):
+    print(status_obj)
+    if status_obj.is_failure():
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
